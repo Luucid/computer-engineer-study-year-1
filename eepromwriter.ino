@@ -4,6 +4,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <EEPROM.h>
 LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);
+//mosi = 51; miso = 50; sck = 52; sda = 53;
 
 #define RST_PIN 5  //reset pin
 #define SS_PIN 53  //slave select pin
@@ -20,12 +21,13 @@ int* blockPtr = &block;
 //This array is used for reading out a block.
 byte readbackblock[18];
 
-String cardID[10];
+
+String cardID[10][3];
 String tagID = "";
 String val = "";
-int k = 8;
-int l = 0;
-bool startup = false;
+
+
+
 void setup()
 {
   Serial.begin(9600);        // Initialize serial communications with the PC
@@ -36,6 +38,8 @@ void setup()
 
   lcd.clear();
   lcd.print("scan your card");
+  int k = 8;
+  int l = 0;
   delay(10);
   // Prepare the security key for the read and write functions.
   for (byte i = 0; i < 6; i++) {
@@ -46,7 +50,7 @@ void setup()
     for (int i = l; i < k; i++) {
       val.concat(char(EEPROM.read(i)));
     }
-    cardID[i] = val;
+    cardID[i][0] = val;
     val = "";
     l = l + 8;
     k = k + 8;
@@ -60,20 +64,6 @@ void setup()
 
 void loop()
 {
-  
-  if (Serial.available()) {
-    char nextPrev = Serial.read();
-    if (nextPrev == 'N' or nextPrev == 'n' && block < 60) {
-      block += 2;
-      Serial.println(block);
-    }
-    else if (nextPrev == 'P' or nextPrev == 'p' && block > 0) {
-      block -= 2;
-      Serial.println(block);
-    }
-
-
-  }
   // Look for new cards
   if ( ! mfrc522.PICC_IsNewCardPresent()) {
     return;
@@ -87,16 +77,8 @@ void loop()
 
   readBlock(block, readbackblock);
 
-
-  //print the block contents
-  Serial.print("card ID: ");
-  for (int j = 0 ; j < 16 ; j++)
-  {
-    Serial.write (readbackblock[j]);
-  }
-  Serial.println("");
   Serial.print("\n");
- 
+
   delay(3000);
   lcd.clear();
   lcd.print("Scan your card");
@@ -110,11 +92,12 @@ void loop()
 //Read specific block
 int readBlock(int blockNumber, byte arrayAddress[])
 {
+  Serial.print("\n");
   lcd.clear();
   val = "";
   tagID = "";
-  k = 0;
-  l = 0;
+  int k = 0;
+  int l = 0;
 
 
   int largestModulo4Number = blockNumber / 4 * 4;
@@ -123,58 +106,131 @@ int readBlock(int blockNumber, byte arrayAddress[])
   //authentication of the desired block for access
   byte status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, trailerBlock, &key, &(mfrc522.uid));
 
-  if (status != MFRC522::STATUS_OK) {
+ /* if (status != MFRC522::STATUS_OK) {
     Serial.print("PCD_Authenticate() failed (read): ");
     Serial.println(mfrc522.GetStatusCodeName(status));
     return 3; //return the value 3 as error message.
-  }
+  }*/
 
   //reading a block
   byte buffersize = 18;
   status = mfrc522.MIFARE_Read(blockNumber, arrayAddress, &buffersize);
-  if (status != MFRC522::STATUS_OK) {
+  
+  /*if (status != MFRC522::STATUS_OK) {
     Serial.print("MIFARE_read() failed: ");
     Serial.println(mfrc522.GetStatusCodeName(status));
     return 4;//return "4" as error message
-  }
-  
+  }*/
+
 
   for ( uint8_t i = 0; i < 4; i++) { // The MIFARE PICCs that we use have 4 byte UID
 
     tagID.concat(String(arrayAddress[i], HEX)); // Adds the 4 bytes in a single String variable
 
   }
+  if (tagID.length() < 8) {
+    int y = tagID.length() + 1;
+    for (int i = y; i <= 8; i++) {
+      tagID.concat('A');
+    }
+  }
   tagID.toUpperCase();
 
-  for (int i = 0; i < 10; i++) {
-    if (tagID == cardID[i]) {
+
+
+  for (int i = 0; i < 10; i++) { //checks for duplicates the array containing card register.
+    if (tagID == cardID[i][0]) {
       Serial.println("duplicate found");
       lcd.print("duplicate found");
       return 0;
     }
   }
-  for (int i = 0; i < 10; i++) {
-    if (cardID[i] == 0) {
-      Serial.print("New card added! ID: ");
-      Serial.println(cardID[i]);
+
+  Serial.println("please enter your name, maximum length: 10");
+  while (!Serial.available());
+  String cardName = Serial.readString();
+  if (cardName.length() > 10) {
+    Serial.println("Your name is too long, scan your card to try again");
+    return 0;
+  }
+  if (cardName.length() < 10) {
+    int x = cardName.length() + 1;
+    for (int i = x; i <= 10; i++) {
+      cardName.concat(' ');
+
+    }
+  }
+  Serial.println(cardName);
+  Serial.println(cardName.length());
+
+
+
+  Serial.println("please enter your new pincode, 4 digits");
+  while (!Serial.available());
+  String pinCode = Serial.readString();
+  if (pinCode.length() != 4) {
+    Serial.println("wrong number of digits, scan your card to try again");
+    return 0;
+  }
+
+
+  Serial.print("\n");
+  for (int i = 0; i < 10; i++) {  //adds new cards to array
+    if (cardID[i][0] == 0) {
+      Serial.println("New card added!");
       lcd.print("New card added!");
-      cardID[i] = tagID;
+      cardID[i][2] = cardName;
+      cardID[i][1] = pinCode;
+      cardID[i][0] = tagID;
+      Serial.println("Card owner: " + cardID[i][2]);
+      Serial.println("Pin code: " + cardID[i][1]);
+      Serial.println("Card ID: " + cardID[i][0]);
       break;
     }
   }
 
-  for (int i = 0; i < 73; i = i + 8) {
+  Serial.print("\n");
+
+
+  for (int i = 0; i < 73; i = i + 8) {  //Main loop writing to EEPROM
     if (EEPROM.read(i) == 0) {
       int k = i;
       int l = k + 8;
+      int t = l + 4;
+      int s = t + 10;
       int j = 0;
-      Serial.print("writing to EEPROM[");
-      Serial.print(i);
-      Serial.println(']');
-      for (int i = k; i < l; i++) {
+      int m = 0;
+      int n = 0;
+
+      Serial.print("\t");
+      Serial.println("EEPROM INDEX FOR CARD_NAME");
+      for (int q = t; q < s; q++) {
+        Serial.print(q);
+        Serial.print("\t");
+        EEPROM.put(q, cardName[n]);
+        n++;
+
+      }
+
+      Serial.print("\n\n");
+      Serial.print("\t");
+      Serial.println("EEPROM INDEX FOR PIN");
+      for (int p = l; p < t; p++) {           //writing card data to EEPROM
+        Serial.print(p);
+        Serial.print("\t");
+        EEPROM.put(p, pinCode[m]);
+        m++;
+      }
+      Serial.print("\n\n");
+      Serial.print("\t");
+
+
+      Serial.println("EEPROM INDEX FOR CARD_DATA");
+      for (int i = k; i < l; i++) {             //writing pin to EEPROM
         EEPROM.put(i, tagID[j]);
         delay(1);
-       // val.concat(EEPROM.read(i));
+        Serial.print(i);
+        Serial.print("\t");
         j++;
       }
       i = 73;
@@ -182,11 +238,11 @@ int readBlock(int blockNumber, byte arrayAddress[])
   }
 }
 
-void duplicate_check() {
+void duplicate_check() {    //init at startup, if duplicates somehow exists in EEPROM, set them to 0.
   for (int i = 0; i < 10; i++) {
     for (int j = 0; j < 10; j++) {
       if (i == j) continue;
-      if (cardID[i] != 0 && cardID[i] == cardID[j]) {
+      if (cardID[i][0] != 0 && cardID[i][0] == cardID[j][0]) {
         for (int k = 0; k < 8; k++) {
           int e_index = i * 8 + k;
           Serial.println("duplikat funnet og slettet ved start-indeks [" + (String)e_index + ']');
